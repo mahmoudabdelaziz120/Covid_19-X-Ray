@@ -1,0 +1,86 @@
+# =============================
+# 1- تحميل البيانات وفك الضغط
+# =============================
+!wget http://cb.lk/covid_19
+!unzip covid_19
+#!unzip covid_19   # لو محتاج تعيد فك الضغط
+
+# =============================
+# 2- استيراد المكتبات
+# =============================
+import keras
+from keras.models import *
+from keras.layers import *
+from keras.preprocessing import image
+from tensorflow.keras.applications import DenseNet121
+from tensorflow.keras.models import Model
+import PIL
+
+# =============================
+# 3- تحميل نموذج DenseNet121
+# =============================
+# تحميل DenseNet121 بدون الطبقة الأخيرة (fully connected) عشان نقدر نعدل عليها
+base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=(224,224,3))
+
+# =============================
+# 4- تجميد الطبقات
+# =============================
+# نجمد الطبقات بتاعة DenseNet121 عشان ما تتدربش من الأول
+for layer in base_model.layers:
+    layer.trainable = False
+
+# =============================
+# 5- إضافة طبقات مخصصة
+# =============================
+x = base_model.output
+x = GlobalAveragePooling2D()(x)   # تحويل المخرجات إلى شكل أصغر
+x = Dense(1024, activation='relu')(x)  # fully connected layer
+preds = Dense(2, activation='softmax')(x)  # 2 classes: (مثلاً: مصاب / سليم)
+
+# بناء الموديل الجديد
+model = Model(inputs=base_model.input, outputs=preds)
+
+# =============================
+# 6- تجهيز البيانات (ImageDataGenerator)
+# =============================
+from keras.preprocessing.image import ImageDataGenerator
+
+train_datagen = ImageDataGenerator(rescale=1./255, shear_range=0.2, zoom_range=0.2, horizontal_flip=True)
+test_datagen  = ImageDataGenerator(rescale=1./255)
+
+# مسارات التدريب والاختبار (هنا لازم تغير حسب مكان الملفات عندك)
+train_generator = train_datagen.flow_from_directory('covid_19/train', target_size=(224,224), batch_size=32, class_mode='categorical')
+validation_generator = test_datagen.flow_from_directory('covid_19/test', target_size=(224,224), batch_size=32, class_mode='categorical')
+
+# =============================
+# 7- Compile الموديل
+# =============================
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# =============================
+# 8- تدريب الموديل
+# =============================
+r = model.fit(
+    train_generator,
+    steps_per_epoch=8,
+    epochs=10,
+    validation_data=validation_generator,
+    validation_steps=2
+)
+
+# =============================
+# 9- حفظ الموديل
+# =============================
+model.save("covid_densenet121.h5")
+
+# =============================
+# 10- اختبار الموديل على صورة جديدة
+# =============================
+import numpy as np
+img = image.load_img("covid_19/test/COVID19/image1.png", target_size=(224,224))  # عدل اسم الصورة
+img = image.img_to_array(img)
+img = np.expand_dims(img, axis=0)
+img = img/255
+
+pred = model.predict(img)
+print("Prediction:", pred)
